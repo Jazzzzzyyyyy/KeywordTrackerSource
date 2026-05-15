@@ -45,7 +45,7 @@ function buildMeta(config) {
 function bundle(content, baseDir, mainFile) {
     const files = fs.readdirSync(baseDir).filter(f => f !== "config.json" && f !== mainFile);
     for (const fileName of files) {
-        const escaped = fileName.replace(/\./g, "\\.");
+        const escaped = fileName.replace(/[.+*?^${}()|[\]\\]/g, "\\$&");
         content = content.replace(
             new RegExp(`require\\(('|"|\`)${escaped}('|"|\`)\\)`, "g"),
             () => {
