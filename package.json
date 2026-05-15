@@ -4,12 +4,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-      "build": "zpl build KeywordTracker && node scripts/postbuild.js",
-      "init": "zpl init KeywordTracker"
+    "build": "zpl build KeywordTracker && node scripts/postbuild.js",
+    "init": "zpl init KeywordTracker"
   },
   "author": "Sarah Ohlin",
   "license": "MIT",
   "dependencies": {
+    "@betterdiscord/cli": "^0.3.0",
     "zerespluginlibrary": "^2.0.6"
   }
 }
