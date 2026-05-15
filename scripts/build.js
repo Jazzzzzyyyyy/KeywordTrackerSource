@@ -50,10 +50,14 @@ function bundle(content, baseDir, mainFile) {
             new RegExp(`require\\(('|"|\`)${escaped}('|"|\`)\\)`, "g"),
             () => {
                 const raw = fs.readFileSync(path.join(baseDir, fileName), "utf8");
-                return `\`${raw
+                // Escape in the correct order so the content is safe inside a
+                // template literal: backslashes first, then interpolation
+                // delimiters, then backticks.
+                const safe = raw
                     .replace(/\\/g, "\\\\")
-                    .replace(/\\\\\$\{/g, "\\${")
-                    .replace(/`/g, "\\`")}\``;
+                    .replace(/\$\{/g, "\\${")
+                    .replace(/`/g, "\\`");
+                return `\`${safe}\``;
             }
         );
     }

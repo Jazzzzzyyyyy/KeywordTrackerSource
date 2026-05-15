@@ -108,10 +108,6 @@ module.exports = (() => {
 		getElement() { return this._elem; }
 	}
 
-	const NotificationModule = Webpack.getByKeys("showNotification");
-	const ButtonData = Webpack.getByKeys("ButtonColors");
-	const GuildStore = Webpack.getStore("GuildStore");
-
 	const RegexEscape = function(string) {
 		return string.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
 	};
@@ -395,7 +391,7 @@ module.exports = (() => {
 		 */
 		loadSettings() {
 			// load settings
-			this.settings = structuredClone(Object.assign({}, defaultSettings, Data.load('KeywordTracker', 'settings') || {}));
+			this.settings = structuredClone({ ...defaultSettings, ...(Data.load('KeywordTracker', 'settings') || {}) });
 		}
 
 		// from ui_modals.js in bd plugin lib, rewriting to fix since broken as of 4/2/2024
