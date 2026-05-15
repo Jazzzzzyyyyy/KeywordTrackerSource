@@ -1,5 +1,5 @@
 module.exports = {
 	out: "./release",
-	copyToBD: true,
+	copyToBD: !process.env.CI,
 	addInstallScript: true
 }
