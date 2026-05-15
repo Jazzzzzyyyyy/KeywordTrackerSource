@@ -1,4 +1,4 @@
-module.exports = (Plugin, Library) => {
+module.exports = (() => {
 	const switchCss = require('switch.css');
 	const inboxCss = require('inbox.css');
 	const iconSVG = require('book-icon.svg');
@@ -16,28 +16,97 @@ module.exports = (Plugin, Library) => {
 		markJumpedRead: false,
 	};
 	const {
-		ReactTools,
-		Logger,
-		Settings,
-		Utilities,
-		PluginUtilities,
-		Modals,
-		Tooltip,
-		Toasts: Toast,
-		DiscordModules: Modules,
-	} = Library;
-	const {
 		Patcher,
 		Webpack,
 		DOM,
 		ReactUtils,
 		React,
 		UI,
+		Logger: BdLogger,
+		Data,
 	} = BdApi;
 
 	const NotificationModule = Webpack.getByKeys("showNotification");
 	const ButtonData = Webpack.getByKeys("ButtonColors");
 	const GuildStore = Webpack.getStore("GuildStore");
+	const UserStore = Webpack.getStore("UserStore");
+	const ChannelStore = Webpack.getStore("ChannelStore");
+	const MessageStore = Webpack.getStore("MessageStore");
+	const GuildChannelsStore = Webpack.getStore("GuildChannelsStore");
+	const NavigationUtils = Webpack.getByKeys("transitionTo");
+
+	const Logger = {
+		info: (...args) => BdLogger.info('KeywordTracker', ...args),
+		warn: (...args) => BdLogger.warn('KeywordTracker', ...args),
+		error: (...args) => BdLogger.error('KeywordTracker', ...args),
+	};
+
+	// Minimal settings-panel DOM helpers (replacing ZPL's Settings classes)
+	class SettingPanel {
+		constructor() {
+			this._elem = document.createElement('div');
+			this._elem.className = 'kt-settings-panel';
+		}
+		append(...items) {
+			for (const item of items) {
+				this._elem.appendChild(item instanceof HTMLElement ? item : item.getElement());
+			}
+			return this;
+		}
+		getElement() { return this._elem; }
+	}
+
+	class SettingGroup {
+		constructor(name) {
+			this._elem = document.createElement('div');
+			this._elem.className = 'kt-settings-group';
+			const title = document.createElement('h5');
+			title.className = 'kt-settings-group-title';
+			title.textContent = name;
+			this._elem.appendChild(title);
+			this._content = document.createElement('div');
+			this._content.className = 'kt-settings-group-content';
+			this._elem.appendChild(this._content);
+		}
+		append(...items) {
+			for (const item of items) {
+				this._content.appendChild(item instanceof HTMLElement ? item : item.getElement());
+			}
+			return this;
+		}
+		getElement() { return this._elem; }
+	}
+
+	class SettingField {
+		constructor(name, note, _callback, element, options = {}) {
+			this._elem = document.createElement('div');
+			this._elem.className = 'kt-settings-field';
+			const noteEl = document.createElement('div');
+			noteEl.className = 'kt-settings-field-note';
+			noteEl.textContent = note;
+			const el = element instanceof HTMLElement ? element : (element ? element.getElement() : null);
+			if (options.noteOnTop) {
+				if (note) this._elem.appendChild(noteEl);
+				if (el) this._elem.appendChild(el);
+			} else {
+				if (name) {
+					const nameEl = document.createElement('div');
+					nameEl.className = 'kt-settings-field-name';
+					nameEl.textContent = name;
+					this._elem.appendChild(nameEl);
+				}
+				if (el) this._elem.appendChild(el);
+				if (note) this._elem.appendChild(noteEl);
+			}
+		}
+		append(...items) {
+			for (const item of items) {
+				this._elem.appendChild(item instanceof HTMLElement ? item : item.getElement());
+			}
+			return this;
+		}
+		getElement() { return this._elem; }
+	}
 
 	const RegexEscape = function(string) {
 		return string.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -47,27 +116,26 @@ module.exports = (Plugin, Library) => {
 		Logger.info(...args);
 	};
 
-	return class KeywordTracker extends Plugin {
+	return class KeywordTracker {
 		/**
 		 * Plugin init
 		 *
 		 * @async
 		 */
-		async onStart() {
-			PluginUtilities.addStyle(this.getName(), switchCss);
-			PluginUtilities.addStyle(this.getName(), inboxCss);
+		async start() {
+			DOM.addStyle('KeywordTracker', switchCss + '\n' + inboxCss);
 			this.loadSettings();
 			this.inboxPanel = null;
 
 			let dispatchModule = Webpack.getByKeys('dispatch', 'subscribe');
-			Patcher.after(this.getName(), dispatchModule, 'dispatch', this.handleMessage.bind(this));
+			Patcher.after('KeywordTracker', dispatchModule, 'dispatch', this.handleMessage.bind(this));
 
 			const stringFilter = BdApi.Webpack.Filters.byStrings(".GUILD_HOME");
 			const keyFilter = BdApi.Webpack.Filters.byKeys("Icon", "Title");
 
 			// patch the title bar to add the inbox button
 			const [ titlebarModule, titlebarKey ] = Webpack.getWithKey((m) => keyFilter(m) && !stringFilter(m));
-			Patcher.before(this.getName(), titlebarModule, titlebarKey, (that, [ props ]) => {
+			Patcher.before('KeywordTracker', titlebarModule, titlebarKey, (that, [ props ]) => {
 				if (props.toolbar.type === 'function') return;
 				if (this.inboxPanel == null) { // build the panel if it's not already built
 					this.inboxPanel = this.buildInboxPanel();
@@ -78,15 +146,15 @@ module.exports = (Plugin, Library) => {
 				props.toolbar.props.children[0].splice(idx, 0, this.inboxPanel);
 			});
 
-			this.userId = Modules.UserStore.getCurrentUser().id;
+			this.userId = UserStore.getCurrentUser().id;
 
 		}
 
-		onStop() {
+		stop() {
 			this.saveSettings();
 
-			Patcher.unpatchAll(this.getName());
-			PluginUtilities.removeStyle(this.getName());
+			Patcher.unpatchAll('KeywordTracker');
+			DOM.removeStyle('KeywordTracker');
 		}
 
 		objectValues(object) {
@@ -111,10 +179,10 @@ module.exports = (Plugin, Library) => {
 				// get me  data
 				let { message } = event;
 				// get channel data
-				let channel = Modules.ChannelStore.getChannel(message.channel_id);
+				let channel = ChannelStore.getChannel(message.channel_id);
 				// assert message data is right
 				if (!message.author) {
-					message = Modules.MessageStore.getMessage(channel.id, message.id);
+					message = MessageStore.getMessage(channel.id, message.id);
 					if (!message || !message.author) return;
 				}
 				if (this.settings.allowSelf === false && message.author.id === this.userId) return;
@@ -239,8 +307,7 @@ module.exports = (Plugin, Library) => {
 							delete this.settings.unreadMatches[message.id];
 						}
 						this.saveSettings();
-						console.log(Modules.NavigationUtils.transitionTo);
-						Modules.NavigationUtils.transitionTo(
+						NavigationUtils.transitionTo(
 							redirect,
 							undefined,
 							undefined,
@@ -315,7 +382,7 @@ module.exports = (Plugin, Library) => {
 		saveSettings() {
 			// clears out empty keywords before saving :)
 			this.settings.keywords = this.settings.keywords.filter((v) => v.trim().length > 0);
-			PluginUtilities.saveSettings('KeywordTracker', this.settings);
+			Data.save('KeywordTracker', 'settings', this.settings);
 		}
 
 		/**
@@ -324,7 +391,7 @@ module.exports = (Plugin, Library) => {
 		 */
 		loadSettings() {
 			// load settings
-			this.settings = Utilities.deepclone(PluginUtilities.loadSettings('KeywordTracker', defaultSettings));
+			this.settings = structuredClone({ ...defaultSettings, ...(Data.load('KeywordTracker', 'settings') || {}) });
 		}
 
 		// from ui_modals.js in bd plugin lib, rewriting to fix since broken as of 4/2/2024
@@ -363,7 +430,7 @@ module.exports = (Plugin, Library) => {
 			inbox.appendChild(icon);
 
 			// add hover tooltip
-			let tooltip = new Tooltip(inbox, 'Keyword Matches');
+			UI.createTooltip(inbox, 'Keyword Matches');
 
 			// actual modal window on-click
 			const openModal = () => {
@@ -388,7 +455,7 @@ module.exports = (Plugin, Library) => {
 			inbox.removeEventListener('click', openModal);
 			inbox.addEventListener('click', openModal);
 
-			return ReactTools.createWrappedElement(inbox);
+			return ReactUtils.wrapElement(inbox);
 		}
 
 		// render all messages from settings.unreadMatches
@@ -436,7 +503,7 @@ module.exports = (Plugin, Library) => {
 					entry.querySelector('.kt-matched > code').textContent = msg._match;
 
 					let read_btn = entry.querySelector('.kt-read');
-					new Tooltip(read_btn, 'Mark as read');
+					UI.createTooltip(read_btn, 'Mark as read');
 					read_btn.addEventListener('click', e => {
 						delete this.settings.unreadMatches[msg.id];
 						this.saveSettings();
@@ -444,14 +511,14 @@ module.exports = (Plugin, Library) => {
 					});
 
 					let jump_btn = entry.querySelector('.kt-jump');
-					new Tooltip(jump_btn, 'Jump to message');
+					UI.createTooltip(jump_btn, 'Jump to message');
 					jump_btn.addEventListener('click', e => {
 						if (this.settings.markJumpedRead) {
 							delete this.settings.unreadMatches[msg.id];
 						}
 						this.saveSettings();
 						closeModal();
-						Modules.NavigationUtils.transitionTo(
+						NavigationUtils.transitionTo(
 							`/channels/${msg.guild_id}/${msg.channel_id}/${msg.id}`,
 							undefined,
 							undefined,
@@ -476,16 +543,15 @@ module.exports = (Plugin, Library) => {
 				setupEntries();
 			});
 
-			return ReactTools.createWrappedElement(root);
+			return ReactUtils.wrapElement(root);
 		}
 
 		//TODO: god why
 		buildSettings() {
-			const { Textbox, SettingPanel, SettingGroup, Keybind, SettingField, /*Switch*/ } = Settings;
 			const guilds = Object.values(GuildStore.getGuilds())
 											.sort((a, b) => `${a.id}`.localeCompare(`${b.id}`))
 											.map(g => {
-												g.channels = Modules.GuildChannelsStore.getChannels(g.id).SELECTABLE.map(c => c.channel);
+												g.channels = GuildChannelsStore.getChannels(g.id).SELECTABLE.map(c => c.channel);
 												return g;
 											});
 			const { parseHTML } = DOM;
@@ -721,4 +787,4 @@ module.exports = (Plugin, Library) => {
 			return panel;
 		}
 	};
-};
+})();
